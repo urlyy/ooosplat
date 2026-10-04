@@ -5,7 +5,7 @@
 
 ## 运行边界
 
-支持环境固定为 **Ubuntu 24.04 LTS x86_64/amd64**。进程不创建窗口，不依赖
+支持环境固定为 **Ubuntu 22.04/24.04 LTS x86_64/amd64**。进程不创建窗口，不依赖
 X11、Wayland、WebKit、Node.js 或本地 Web 服务。
 
 完整流水线如下：
@@ -46,7 +46,7 @@ cd ooosplat
 ./scripts/build-headless-linux.sh
 ```
 
-脚本只接受 `Linux x86_64`，使用已提交的 `Cargo.lock`，校验 Brush 下载和二进制的
+脚本只接受 Ubuntu 22.04/24.04 x86_64，使用已提交的 `Cargo.lock`，校验 Brush 下载和二进制的
 SHA-256，并在重新打包发行目录前清理旧 `dist-headless/`。
 
 发行目录结构：
@@ -79,9 +79,12 @@ dist-headless/
 Mapper 相机重建仍主要使用 CPU，FFmpeg 抽帧也不启用硬件解码。Brush 使用独立的
 Vulkan 设备选择，不受这个 COLMAP 开关控制。
 
-推荐使用 Ubuntu 24.04 x86_64 的 NVIDIA GPU 镜像，先按云厂商说明安装或启用
-NVIDIA 驱动，确认 `nvidia-smi` 能看到显卡。CUDA 和 Vulkan 都必须可用。
-普通 `apt install colmap` 不保证包含 CUDA；NVIDIA 服务器首次运行按以下步骤：
+推荐使用 Ubuntu 22.04/24.04 x86_64 的 NVIDIA GPU 镜像，先按云厂商说明安装或启用
+NVIDIA 驱动，确认 `nvidia-smi` 能看到显卡，再用 `vulkaninfo --summary` 确认
+NVIDIA Vulkan 设备可见。COLMAP 使用 GPU 时还需要兼容显卡架构的 CUDA 工具包。
+`nvidia-smi` 的 CUDA 版本只表示驱动能力；若已有 `/usr/local/cuda/bin/nvcc`，
+将 `/usr/local/cuda/bin` 加入 `PATH` 后用 `nvcc --version` 检查工具包。
+普通 `apt install colmap` 不保证包含 CUDA；需要 COLMAP GPU 的服务器按以下步骤：
 
 ```bash
 # 在本仓库根目录，Rust stable 已安装；以下 apt 命令需要 sudo 或 root。
@@ -100,11 +103,17 @@ OOOSPLAT_COLMAP_BACKEND=gpu ./dist-headless/splatstudio generate /data/object.mp
 ```
 
 CUDA 安装脚本固定 COLMAP 3.11.1（提交 `682ea9ac4020a143047758739259b3ff04dabe8d`），
-关闭 GUI 和 OpenGL，默认用 2 个编译任务、为当前显卡编译。首次构建需要下载 CUDA
-工具包和 C++ 依赖，可能花较长时间。`OOOSPLAT_BUILD_JOBS` 可调整编译并行数；
-`CUDA_ARCHITECTURES` 默认 `native`，跨显卡部署时应明确指定目标架构。
-较新显卡若不被 Ubuntu CUDA 工具包支持，需要先按 NVIDIA 文档安装匹配的工具包，
-准备 C++ 依赖后不带 `--install-system-deps` 运行脚本。
+关闭 GUI 和 OpenGL，默认用 2 个编译任务、为当前显卡编译。脚本的
+`--install-system-deps` 安装 C++ 依赖；CUDA 工具包须按显卡架构单独安装。
+首次构建可能花较长时间。`OOOSPLAT_BUILD_JOBS` 可调整编译并行数；
+`CUDA_ARCHITECTURES` 默认取 `nvidia-smi` 检测到的第一张 GPU 计算能力
+（如 RTX 5090 为 `120`）；跨显卡部署或无法检测时应明确指定目标架构。
+较新显卡若不被 Ubuntu CUDA 工具包支持，需要先按 NVIDIA 文档安装匹配的工具包。
+例如 RTX 5090 不应直接依赖 Ubuntu 22.04 仓库的旧版 `nvidia-cuda-toolkit`；
+先安装支持该显卡架构的 NVIDIA CUDA 工具包并确认 `nvcc --version`，然后运行
+`./scripts/setup-colmap-cuda-linux.sh --install-system-deps`。暂不安装 CUDA 时，默认 `auto` 模式可让系统
+COLMAP 回退 CPU；Brush 仍需要 Vulkan GPU。
+Ubuntu 22.04 上 RTX 5090 的 CUDA 12.8 安装命令见 README「GPU 云服务器首次配置」。
 
 `OOOSPLAT_COLMAP` 指向本机安装路径。该 CUDA 构建及其动态库不打包进
 `dist-headless/`，在另一台服务器上需重新安装。不要在使用期间删除
@@ -134,7 +143,7 @@ CUDA 安装脚本固定 COLMAP 3.11.1（提交 `682ea9ac4020a143047758739259b3ff
 ```bash
 sudo apt-get update
 sudo apt-get install --no-install-recommends -y \
-  ca-certificates colmap ffmpeg libvulkan1 mesa-vulkan-drivers
+  ca-certificates colmap ffmpeg libvulkan1 mesa-vulkan-drivers vulkan-tools
 ```
 
 按显卡厂商文档安装 GPU 驱动。然后设置引擎目录：

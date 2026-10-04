@@ -1,6 +1,6 @@
 # OOOSplat Headless
 
-OOOSplat Headless 是面向 **Ubuntu 24.04 LTS x86_64** 服务器的视频/图片序列转
+OOOSplat Headless 是面向 **Ubuntu 22.04/24.04 LTS x86_64** 服务器的视频/图片序列转
 3D Gaussian Splatting 命令行工具。仓库只保留本地 headless 生成链路，不包含
 React、Tauri、WebKit、桌面预览器，也不提供 Windows 或 macOS 安装包。
 
@@ -19,7 +19,7 @@ React、Tauri、WebKit、桌面预览器，也不提供 Windows 或 macOS 安装
 
 | 项目 | 支持情况 |
 | --- | --- |
-| 操作系统 | Ubuntu 24.04 LTS |
+| 操作系统 | Ubuntu 22.04/24.04 LTS |
 | 架构 | x86_64/amd64 |
 | 运行方式 | 前台 CLI、后台单任务 worker |
 | 生成输入 | MP4/MOV 视频；同尺寸 JPG/PNG 图片序列目录 |
@@ -55,8 +55,8 @@ cargo --version
 
 ### 2. 克隆并构建
 
-NVIDIA GPU 云服务器请在克隆后先按下方「GPU 云服务器首次配置」安装 CUDA 版
-COLMAP，再构建本项目；只装系统 COLMAP 时可能回退 CPU。
+NVIDIA GPU 云服务器若要让 COLMAP 使用 GPU，请在克隆后按下方「GPU 云服务器首次配置」
+安装 CUDA 版 COLMAP；只装系统 COLMAP 时可能回退 CPU。Brush 仍需要 Vulkan GPU。
 
 下面的命令会通过 apt 安装 Ubuntu 系统依赖、下载并校验固定版本 Brush，随后
 构建 release CLI：
@@ -75,8 +75,8 @@ cd ooosplat
 
 构建脚本执行以下动作：
 
-1. 拒绝非 Linux x86_64 环境；
-2. 可选安装 FFmpeg、FFprobe、COLMAP、Vulkan loader 和构建依赖；
+1. 拒绝非 Ubuntu 22.04/24.04 x86_64 环境；
+2. 可选安装 FFmpeg、FFprobe、COLMAP、Vulkan loader、`vulkaninfo` 和构建依赖；
 3. 下载 Brush v0.3.0，并校验压缩包及可执行文件 SHA-256；
 4. 验证 FFmpeg、FFprobe、COLMAP 和 Brush CLI；
 5. 使用 `cargo build --locked --release` 构建；
@@ -102,9 +102,13 @@ export OOOSPLAT_ENGINE_DIR="$PWD/dist-headless/engines"
 Mapper 相机重建仍主要使用 CPU，FFmpeg 抽帧也不启用硬件解码。Brush 使用独立的
 Vulkan 设备选择，不受这个 COLMAP 开关控制。
 
-推荐使用 Ubuntu 24.04 x86_64 的 NVIDIA GPU 镜像，先按云厂商说明安装或启用
-NVIDIA 驱动，确认 `nvidia-smi` 能看到显卡。CUDA 和 Vulkan 都必须可用。
-普通 `apt install colmap` 不保证包含 CUDA；NVIDIA 服务器首次运行按以下步骤：
+推荐使用 Ubuntu 22.04/24.04 x86_64 的 NVIDIA GPU 镜像，先按云厂商说明安装或启用
+NVIDIA 驱动，确认 `nvidia-smi` 能看到显卡，再用 `vulkaninfo --summary` 确认
+NVIDIA Vulkan 设备可见。COLMAP 使用 GPU 时还需要兼容显卡架构的 CUDA 工具包。
+`nvidia-smi` 显示的 CUDA 版本是驱动能力，不代表 `nvcc` 已在 `PATH`。
+如果已有 `/usr/local/cuda/bin/nvcc`，先执行
+`export PATH="/usr/local/cuda/bin:$PATH"` 并运行 `nvcc --version`；无需重复安装工具包。
+普通 `apt install colmap` 不保证包含 CUDA；需要 COLMAP GPU 的服务器按以下步骤：
 
 ```bash
 # 在本仓库根目录，Rust stable 已安装；以下 apt 命令需要 sudo 或 root。
@@ -123,11 +127,27 @@ OOOSPLAT_COLMAP_BACKEND=gpu ./dist-headless/splatstudio generate /data/object.mp
 ```
 
 CUDA 安装脚本固定 COLMAP 3.11.1（提交 `682ea9ac4020a143047758739259b3ff04dabe8d`），
-关闭 GUI 和 OpenGL，默认用 2 个编译任务、为当前显卡编译。首次构建需要下载 CUDA
-工具包和 C++ 依赖，可能花较长时间。`OOOSPLAT_BUILD_JOBS` 可调整编译并行数；
-`CUDA_ARCHITECTURES` 默认 `native`，跨显卡部署时应明确指定目标架构。
-较新显卡若不被 Ubuntu CUDA 工具包支持，需要先按 NVIDIA 文档安装匹配的工具包，
-准备 C++ 依赖后不带 `--install-system-deps` 运行脚本。
+关闭 GUI 和 OpenGL，默认用 2 个编译任务、为当前显卡编译。脚本的
+`--install-system-deps` 安装 C++ 依赖；CUDA 工具包须按显卡架构单独安装。
+首次构建可能花较长时间。`OOOSPLAT_BUILD_JOBS` 可调整编译并行数；
+`CUDA_ARCHITECTURES` 默认取 `nvidia-smi` 检测到的第一张 GPU 计算能力
+（如 RTX 5090 为 `120`）；跨显卡部署或无法检测时应明确指定目标架构。
+较新显卡若不被 Ubuntu CUDA 工具包支持，需要先按 NVIDIA 文档安装匹配的工具包。
+例如 RTX 5090 不应直接依赖 Ubuntu 22.04 仓库的旧版 `nvidia-cuda-toolkit`；
+先安装支持该显卡架构的 NVIDIA CUDA 工具包并确认 `nvcc --version`，然后运行
+`./scripts/setup-colmap-cuda-linux.sh --install-system-deps`。如暂不安装 CUDA，保留默认 `auto` 模式，
+系统 COLMAP 可回退 CPU；这不影响 Brush 对 Vulkan GPU 的要求。
+Ubuntu 22.04 上的 RTX 5090 可按 [NVIDIA 官方 CUDA 仓库](https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/)
+安装 CUDA 12.8 工具包（不安装驱动包）：
+
+```bash
+curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i /tmp/cuda-keyring_1.1-1_all.deb
+sudo apt-get update
+sudo apt-get install --no-install-recommends -y cuda-toolkit-12-8
+export PATH="/usr/local/cuda-12.8/bin:$PATH"
+nvcc --version
+```
 
 `OOOSPLAT_COLMAP` 指向本机安装路径。该 CUDA 构建及其动态库不打包进
 `dist-headless/`，在另一台服务器上需重新安装。不要在使用期间删除
@@ -175,13 +195,13 @@ dist-headless/
   TRADEMARK_POLICY.md
 ```
 
-可以把整个目录复制到另一台 Ubuntu 24.04 x86_64 机器，例如
+可以把整个目录复制到另一台 Ubuntu 22.04/24.04 x86_64 机器，例如
 `/opt/ooosplat/`。目标机仍需安装系统运行依赖：
 
 ```bash
 sudo apt-get update
 sudo apt-get install --no-install-recommends -y \
-  ca-certificates colmap ffmpeg libvulkan1 mesa-vulkan-drivers
+  ca-certificates colmap ffmpeg libvulkan1 mesa-vulkan-drivers vulkan-tools
 ```
 
 生产机应按显卡厂商文档安装真实 GPU 驱动。运行时建议明确指定引擎目录：
@@ -454,7 +474,7 @@ export OOOSPLAT_ENGINE_DIR="$PWD/dist-headless/engines"
 ./dist-headless/splatstudio health
 ```
 
-CI 位于 `.github/workflows/ubuntu.yml`，覆盖 Ubuntu 24.04 系统依赖、Brush 校验、
+CI 位于 `.github/workflows/ubuntu.yml`，覆盖 Ubuntu 22.04/24.04 系统依赖、Brush 校验、
 Rust 格式/测试/clippy、GPU 策略模拟集成、FFmpeg probe/extract 集成和发行目录构建。
 普通 CI 没有 NVIDIA GPU，不执行 CUDA 源码构建或真实 CUDA/Vulkan 训练。
 

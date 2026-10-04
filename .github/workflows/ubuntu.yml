@@ -10,8 +10,12 @@ permissions:
 
 jobs:
   test-and-build:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.ubuntu }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: [ubuntu-22.04, ubuntu-24.04]
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -21,7 +25,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             build-essential ca-certificates colmap curl ffmpeg \
-            libssl-dev libvulkan1 mesa-vulkan-drivers pkg-config xz-utils
+            libssl-dev libvulkan1 mesa-vulkan-drivers pkg-config vulkan-tools xz-utils
 
       - name: Set up Rust
         run: |
@@ -52,6 +56,11 @@ jobs:
             -f lavfi -i testsrc=size=320x240:rate=10 -t 2 \
             -c:v mpeg4 /tmp/ooosplat-ci.mp4
           cargo run --locked --bin splatstudio -- probe /tmp/ooosplat-ci.mp4
+          ffmpeg -y -hide_banner -loglevel error \
+            -i /tmp/ooosplat-ci.mp4 -c copy -metadata:s:v:0 rotate=90 \
+            /tmp/ooosplat-ci-rotated.mp4
+          cargo run --locked --bin splatstudio -- probe /tmp/ooosplat-ci-rotated.mp4 \
+            | python3 -c 'import json, sys; assert json.load(sys.stdin)["rotation"] == 90'
           cargo run --locked --bin splatstudio -- \
             extract /tmp/ooosplat-ci.mp4 /tmp/ooosplat-ci-frames --quality fast
           test "$(find /tmp/ooosplat-ci-frames -maxdepth 1 -name '*.jpg' | wc -l)" -gt 0
@@ -76,7 +85,7 @@ jobs:
       - name: Upload headless distribution
         uses: actions/upload-artifact@v7
         with:
-          name: ooosplat-headless-linux-x86_64
+          name: ooosplat-headless-${{ matrix.ubuntu }}-x86_64
           path: dist-headless/
           if-no-files-found: error
           retention-days: 14

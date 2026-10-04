@@ -8,10 +8,10 @@ usage() {
   cat <<'EOF'
 Usage: scripts/build-headless-linux.sh [--install-system-deps]
 
-Build the OOOSplat command-line runner for Ubuntu 24.04 x86_64.
+Build the OOOSplat command-line runner for Ubuntu 22.04/24.04 x86_64.
 
 Options:
-  --install-system-deps  Install Ubuntu 24.04 build/runtime packages with apt.
+  --install-system-deps  Install Ubuntu 22.04/24.04 build/runtime packages with apt.
   -h, --help             Show this help.
 EOF
 }
@@ -35,7 +35,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
-  echo "This build is supported only on Linux x86_64 (validated on Ubuntu 24.04)." >&2
+  echo "This build requires Linux x86_64." >&2
+  exit 1
+fi
+if [[ ! -f /etc/os-release ]]; then
+  echo "Cannot identify the Linux distribution." >&2
+  exit 1
+fi
+source /etc/os-release
+if [[ "${ID:-}" != "ubuntu" || ( "${VERSION_ID:-}" != "22.04" && "${VERSION_ID:-}" != "24.04" ) ]]; then
+  echo "This build supports Ubuntu 22.04 or 24.04 x86_64." >&2
   exit 1
 fi
 
@@ -48,7 +57,7 @@ if $install_system_deps; then
   "${apt[@]}" update
   "${apt[@]}" install -y \
     build-essential ca-certificates colmap curl ffmpeg libssl-dev libvulkan1 \
-    mesa-vulkan-drivers pkg-config xz-utils
+    mesa-vulkan-drivers pkg-config vulkan-tools xz-utils
 fi
 
 for command_name in cargo curl ffmpeg ffprobe sha256sum tar; do

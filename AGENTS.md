@@ -5,7 +5,7 @@
 
 ## 项目目标
 
-本仓库只交付 Ubuntu 24.04 LTS x86_64 的 OOOSplat headless CLI。产品能力是把
+本仓库只交付 Ubuntu 22.04/24.04 LTS x86_64 的 OOOSplat headless CLI。产品能力是把
 本地 MP4/MOV 视频或 JPG/PNG 图片序列转换为 3D Gaussian Splatting `final.ply`，并支持
 后台单任务、实时状态、安全暂停和断点恢复。
 
@@ -36,7 +36,7 @@ macOS、移动端、Web 服务、遥测上报和数据库服务。除非用户�
 
 ## 平台与依赖边界
 
-- 支持平台只有 Ubuntu 24.04 x86_64。
+- 支持平台只有 Ubuntu 22.04/24.04 x86_64。
 - Rust 使用 stable；构建必须使用已提交的 `Cargo.lock` 和 `--locked`。
 - FFmpeg、FFprobe 来自 Ubuntu 系统包；COLMAP 可来自系统包或固定版本 CUDA 源码构建。
 - COLMAP 默认 auto：CUDA 特征提取/匹配探测通过后用 GPU，否则回退 CPU；gpu 模式禁止回退。
@@ -150,7 +150,7 @@ bash -n scripts/*.sh
 ./scripts/build-headless-linux.sh --help
 ```
 
-只有 Ubuntu 24.04 x86_64 可以执行完整构建：
+只有 Ubuntu 22.04/24.04 x86_64 可以执行完整构建：
 
 ```bash
 ./scripts/build-headless-linux.sh

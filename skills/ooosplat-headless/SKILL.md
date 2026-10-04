@@ -1,11 +1,11 @@
 ---
 name: ooosplat-headless
-description: Build, verify, deploy, and operate the OOOSplat Ubuntu 24.04 x86_64 headless CLI. Use for FFmpeg, FFprobe, GPU-first COLMAP, Brush Vulkan setup; MP4/MOV or JPG/PNG reconstruction; probe, plan, extract, generate, tasks, status, pause, resume, switch, checkpoint diagnosis, or locating final.ply.
+description: Build, verify, deploy, and operate the OOOSplat Ubuntu 22.04/24.04 x86_64 headless CLI. Use for FFmpeg, FFprobe, GPU-first COLMAP, Brush Vulkan setup; MP4/MOV or JPG/PNG reconstruction; probe, plan, extract, generate, tasks, status, pause, resume, switch, checkpoint diagnosis, or locating final.ply.
 ---
 
 # OOOSplat Headless
 
-Operate the repository's `splatstudio` CLI on Ubuntu 24.04 x86_64. This skill
+Operate the repository's `splatstudio` CLI on Ubuntu 22.04/24.04 x86_64. This skill
 covers only the headless server product.
 
 ## Read the repository contract
@@ -51,6 +51,8 @@ command -v sha256sum
 command -v tar
 ```
 
+Also check `/etc/os-release`; builds support Ubuntu 22.04 and 24.04 only.
+
 Brush needs a working Vulkan GPU and vendor driver. The presence of
 `libvulkan1` or Mesa alone does not prove production GPU training works.
 
@@ -86,6 +88,11 @@ Read the GPU first-run instructions in README.md. Install the vendor driver firs
 Use `scripts/setup-colmap-cuda-linux.sh --install-system-deps` to build the pinned
 headless CUDA COLMAP, then export
 `OOOSPLAT_COLMAP="$PWD/.cache/colmap-cuda/install/bin/colmap"` before build/health/run.
+Install a compatible NVIDIA CUDA toolkit separately before running the script.
+The `--install-system-deps` option installs C++ build dependencies only.
+The script detects `CUDA_ARCHITECTURES` from the first GPU compute capability;
+set it explicitly for cross-GPU deployment.
+The system COLMAP can run in CPU mode while Brush still uses Vulkan GPU.
 Keep that installation; it is not bundled into dist-headless.
 
 `OOOSPLAT_COLMAP_BACKEND` defaults to `auto`: probe CUDA feature extraction and

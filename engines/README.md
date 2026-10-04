@@ -1,30 +1,19 @@
-# Native engine runtime
+# Linux engines
 
-Native binaries are not stored in Git. Exact upstream URLs, archive hashes,
-installation rules, reported versions, and executable hashes are pinned in
-`manifest.json` (Windows), `manifest.linux.json` (Ubuntu 24.04 Alpha,
-x86_64 only), and `manifest.macos.json` (macOS 15+ Apple Silicon Alpha).
+OOOSplat headless uses system `ffmpeg`, `ffprobe`, and `colmap` (CUDA preferred) packages.
+The bundled managed binary is Brush v0.3.0 for Linux x86_64.
+For NVIDIA servers, build CUDA COLMAP with `scripts/setup-colmap-cuda-linux.sh`
+and set `OOOSPLAT_COLMAP` to its printed path. This local installation is not
+copied into dist-headless. See the GPU first-run instructions in the root README.
 
-Restore the local release inputs before development or packaging:
+Install and verify it with:
 
-```text
-npm run setup:engines
-npm run verify:engines
+```bash
+./scripts/setup-engines-linux.sh
+./scripts/verify-engines-linux.sh
 ```
 
-Downloaded archives are cached under `.cache/engines/`, and extracted runtimes
-are placed in this directory. Both are ignored by Git. The finished NSIS
-installer still embeds the complete verified runtimes, so Windows end users do
-not need to download or configure engines. For the Ubuntu 24.04 Alpha, setup
-installs only the pinned Linux x86_64 Brush binary under
-`engines/linux/brush`; the Ubuntu `.deb` embeds that runtime while FFmpeg,
-FFprobe, and CPU COLMAP are provided through declared package dependencies.
-Other Linux distributions remain outside the current delivery scope.
-
-The macOS Alpha restores a complete self-contained runtime under
-`engines/macos/arm64/`. Its FFmpeg/FFprobe and CPU CLI-only COLMAP builds are
-produced from pinned upstream sources; Brush uses its pinned official arm64
-archive. The packaged app never writes into its resources and never falls back
-to Homebrew or system `PATH`. Maintainers install the pinned build formulae
-with `npm run setup:build-deps:macos` and rebuild the release archive with
-`npm run build:engines:macos` on an Apple Silicon Mac.
+The pinned source URL and SHA-256 values are recorded in
+[`manifest.linux.json`](manifest.linux.json). Downloaded archives live under
+`.cache/engines/`, and the extracted Brush binary lives under
+`engines/linux/brush/`; both are ignored by Git.

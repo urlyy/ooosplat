@@ -1,0 +1,494 @@
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+use chrono::{Local, Utc};
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
+
+use crate::{
+    error::{Result, SplatError},
+    presets::Quality,
+    project::{
+        catalog, PipelineStateFile, ProjectInputType, ProjectMetadata, ProjectStatus,
+        PROJECT_APP_ID,
+    },
+};
+
+#[derive(Debug, Clone)]
+pub struct ProjectPaths {
+    pub id: Uuid,
+    pub project: PathBuf,
+    pub metadata: PathBuf,
+    pub source: PathBuf,
+    pub output: PathBuf,
+    pub work: PathBuf,
+    pub frames: PathBuf,
+    pub masks: PathBuf,
+    pub colmap: PathBuf,
+    pub brush: PathBuf,
+    pub logs: PathBuf,
+    pub state: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectImportProgress {
+    pub current: u64,
+    pub total: u64,
+}
+
+pub type ProjectImportObserver = Arc<dyn Fn(ProjectImportProgress) + Send + Sync + 'static>;
+
+impl ProjectPaths {
+    pub fn existing(id: Uuid, project: PathBuf) -> Self {
+        let source = project.join("source");
+        let work = project.join("work");
+        Self {
+            id,
+            metadata: project.join("project.json"),
+            output: project.clone(),
+            frames: work.join("frames"),
+            masks: work.join("masks"),
+            colmap: work.join("colmap"),
+            brush: work.join("brush"),
+            logs: project.join("logs"),
+            state: project.join("state.json"),
+            project,
+            source,
+            work,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectManager {
+    projects_root: PathBuf,
+    register_in_catalog: bool,
+}
+
+impl ProjectManager {
+    pub fn system_default() -> Result<Self> {
+        Ok(Self {
+            projects_root: catalog::default_projects_root()?,
+            register_in_catalog: true,
+        })
+    }
+    pub fn with_root(projects_root: PathBuf) -> Self {
+        Self {
+            projects_root,
+            register_in_catalog: true,
+        }
+    }
+    pub fn for_diagnostics(projects_root: PathBuf) -> Self {
+        Self {
+            projects_root,
+            register_in_catalog: false,
+        }
+    }
+
+    pub async fn validate_root(root: &Path) -> Result<()> {
+        tokio::fs::create_dir_all(root).await?;
+        if !root.is_dir() {
+            return Err(SplatError::InvalidPath(root.to_path_buf()));
+        }
+        let probe = root.join(format!(".ooosplat-write-{}.tmp", Uuid::new_v4()));
+        tokio::fs::write(&probe, b"OOOSplat")
+            .await
+            .map_err(|error| {
+                SplatError::Process(format!("项目根目录不可写：{}（{error}）", root.display()))
+            })?;
+        tokio::fs::remove_file(probe).await?;
+        Ok(())
+    }
+
+    pub async fn create(
+        &self,
+        input: &Path,
+        quality: Quality,
+    ) -> Result<(ProjectPaths, ProjectMetadata)> {
+        self.create_with_progress(input, quality, None, None).await
+    }
+
+    pub async fn create_with_progress(
+        &self,
+        input: &Path,
+        quality: Quality,
+        observer: Option<ProjectImportObserver>,
+        cancellation: Option<CancellationToken>,
+    ) -> Result<(ProjectPaths, ProjectMetadata)> {
+        let image_scan = if input.is_dir() {
+            let source = input.to_path_buf();
+            let token = cancellation.clone();
+            Some(
+                tokio::task::spawn_blocking(move || {
+                    crate::video::scan_image_sequence(&source, token.as_ref())
+                })
+                .await
+                .map_err(|error| SplatError::Process(format!("图片序列分析任务失败：{error}")))??,
+            )
+        } else {
+            None
+        };
+        let input_type = if image_scan.is_some() {
+            ProjectInputType::Images
+        } else {
+            validate_video_path(input)?;
+            ProjectInputType::Video
+        };
+        Self::validate_root(&self.projects_root).await?;
+        let id = Uuid::new_v4();
+        let stem = if input_type == ProjectInputType::Images {
+            input
+                .file_name()
+                .and_then(|v| v.to_str())
+                .unwrap_or("images")
+        } else {
+            input
+                .file_stem()
+                .and_then(|v| v.to_str())
+                .unwrap_or("project")
+        };
+        let base = format!(
+            "{}_{}",
+            Local::now().format("%Y%m%d-%H%M%S"),
+            sanitize_project_name(stem)
+        );
+        let project = unique_project_path(&self.projects_root, &base);
+        let source = project.join("source");
+        let work = project.join("work");
+        let frames = work.join("frames");
+        let masks = work.join("masks");
+        let colmap = work.join("colmap");
+        let brush = work.join("brush");
+        let logs = project.join("logs");
+        for directory in [&source, &frames, &colmap, &brush, &logs] {
+            tokio::fs::create_dir_all(directory).await?;
+        }
+        let stored_source = if input_type == ProjectInputType::Images {
+            let images_dir = source.join("images");
+            tokio::fs::create_dir_all(&images_dir).await?;
+            let scan = image_scan
+                .as_ref()
+                .expect("image projects have a completed header scan");
+            let total = scan.images.len() as u64;
+            let mut last_percent = -1_i32;
+            if let Some(observer) = &observer {
+                observer(ProjectImportProgress { current: 0, total });
+            }
+            for (index, image) in scan.images.iter().enumerate() {
+                if cancellation
+                    .as_ref()
+                    .is_some_and(CancellationToken::is_cancelled)
+                {
+                    let _ = tokio::fs::remove_dir_all(&project).await;
+                    return Err(SplatError::Cancelled);
+                }
+                let dest =
+                    images_dir.join(crate::video::normalized_image_name(index, &image.path)?);
+                if let Err(error) = tokio::fs::copy(&image.path, &dest).await {
+                    let _ = tokio::fs::remove_dir_all(&project).await;
+                    return Err(error.into());
+                }
+                let current = index as u64 + 1;
+                let percent = (current.saturating_mul(100) / total.max(1)) as i32;
+                if percent != last_percent || current == total {
+                    last_percent = percent;
+                    if let Some(observer) = &observer {
+                        observer(ProjectImportProgress { current, total });
+                    }
+                }
+            }
+            images_dir
+        } else {
+            let extension = input
+                .extension()
+                .and_then(|v| v.to_str())
+                .unwrap_or("mp4")
+                .to_ascii_lowercase();
+            let stored = source.join(format!("input.{extension}"));
+            tokio::fs::copy(input, &stored).await?;
+            stored
+        };
+        let now = Utc::now();
+        let metadata = ProjectMetadata {
+            schema_version: crate::project::metadata::schema_version(),
+            app_id: PROJECT_APP_ID.into(),
+            id,
+            name: base,
+            created_at: now,
+            started_at: Some(now),
+            completed_at: None,
+            duration_ms: None,
+            status: ProjectStatus::Running,
+            source_path: stored_source,
+            input_type,
+            quality,
+            project_path: project.clone(),
+            output_path: None,
+            output: None,
+            failure_message: None,
+            model: "final.ply".into(),
+            transform: Default::default(),
+            editing: Default::default(),
+            reshoot: None,
+        };
+        let metadata_path = project.join("project.json");
+        atomic_write_json(&metadata_path, &metadata).await?;
+        let state = project.join("state.json");
+        let mut pipeline_state = PipelineStateFile::created_for(quality, input_type);
+        pipeline_state.image_sequence = image_scan.map(|scan| scan.info);
+        atomic_write_json(&state, &pipeline_state).await?;
+        if self.register_in_catalog {
+            catalog::register_project(id, &project).await?;
+        }
+        Ok((
+            ProjectPaths {
+                id,
+                project: project.clone(),
+                metadata: metadata_path,
+                source,
+                output: project,
+                work,
+                frames,
+                masks,
+                colmap,
+                brush,
+                logs,
+                state,
+            },
+            metadata,
+        ))
+    }
+
+    pub async fn write_state(&self, path: &Path, state: &PipelineStateFile) -> Result<()> {
+        atomic_write_json(path, state).await
+    }
+    pub async fn read_state(&self, path: &Path) -> Result<PipelineStateFile> {
+        Ok(serde_json::from_slice(&tokio::fs::read(path).await?)?)
+    }
+    pub async fn write_metadata(&self, path: &Path, metadata: &ProjectMetadata) -> Result<()> {
+        atomic_write_json(path, metadata).await
+    }
+}
+
+pub fn sanitize_project_name(value: &str) -> String {
+    let mut result = value
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || ch.is_control()
+            {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect::<String>();
+    result = result.trim().trim_end_matches(['.', ' ']).to_string();
+    if result.is_empty() {
+        result = "project".into();
+    }
+    result.chars().take(64).collect()
+}
+
+fn unique_project_path(root: &Path, base: &str) -> PathBuf {
+    let initial = root.join(base);
+    if !initial.exists() {
+        return initial;
+    }
+    for suffix in 2..10_000 {
+        let candidate = root.join(format!("{base}-{suffix}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    root.join(format!("{base}-{}", Uuid::new_v4()))
+}
+
+fn validate_video_path(path: &Path) -> Result<()> {
+    if !path.is_file() {
+        return Err(SplatError::InvalidPath(path.to_path_buf()));
+    }
+    match path
+        .extension()
+        .and_then(|v| v.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("mp4" | "mov") => Ok(()),
+        _ => Err(SplatError::InvalidVideo("仅支持 MP4 或 MOV 文件".into())),
+    }
+}
+
+pub async fn atomic_write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
+    let temporary = path.with_extension("json.tmp");
+    let bytes = serde_json::to_vec_pretty(value)?;
+    let mut file = tokio::fs::File::create(&temporary).await?;
+    use tokio::io::AsyncWriteExt;
+    file.write_all(&bytes).await?;
+    file.sync_all().await?;
+    drop(file);
+    atomic_replace(&temporary, path)?;
+    Ok(())
+}
+
+pub(crate) async fn atomic_replace_file(source: &Path, destination: &Path) -> Result<()> {
+    let source = source.to_path_buf();
+    let destination = destination.to_path_buf();
+    tokio::task::spawn_blocking(move || atomic_replace(&source, &destination))
+        .await
+        .map_err(|error| SplatError::Process(format!("原子发布任务失败：{error}")))?
+}
+
+fn atomic_replace(source: &Path, destination: &Path) -> Result<()> {
+    std::fs::rename(source, destination)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn sanitizes_unsafe_project_name_characters() {
+        assert_eq!(sanitize_project_name("房子:轨迹?.mp4"), "房子_轨迹_.mp4");
+    }
+
+    #[test]
+    fn limits_names_and_avoids_collisions() {
+        let temporary = tempfile::tempdir().unwrap();
+        let long = "a".repeat(100);
+        assert_eq!(sanitize_project_name(&long).chars().count(), 64);
+        let first = temporary.path().join("20260101-120000_demo");
+        std::fs::create_dir(&first).unwrap();
+        assert_eq!(
+            unique_project_path(temporary.path(), "20260101-120000_demo"),
+            temporary.path().join("20260101-120000_demo-2")
+        );
+    }
+
+    #[tokio::test]
+    async fn atomically_replaces_existing_json() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("settings.json");
+        atomic_write_json(&path, &serde_json::json!({"value": 1}))
+            .await
+            .unwrap();
+        atomic_write_json(&path, &serde_json::json!({"value": 2}))
+            .await
+            .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&tokio::fs::read(path).await.unwrap()).unwrap();
+        assert_eq!(value["value"], 2);
+    }
+
+    #[tokio::test]
+    async fn creates_self_contained_unicode_project() {
+        let temporary = tempfile::tempdir().unwrap();
+        let input = temporary.path().join("鞋子 scan.mp4");
+        std::fs::write(&input, b"test").unwrap();
+        let (paths, metadata) = ProjectManager::for_diagnostics(temporary.path().join("项目 Root"))
+            .create(&input, Quality::Balanced)
+            .await
+            .unwrap();
+        assert!(metadata.source_path.is_file());
+        assert_eq!(paths.output, paths.project);
+        assert!(paths.state.is_file());
+    }
+
+    #[tokio::test]
+    async fn copies_image_sequences_with_stable_names() {
+        let temporary = tempfile::tempdir().unwrap();
+        let input = temporary.path().join("图片序列");
+        std::fs::create_dir(&input).unwrap();
+        image::RgbImage::new(2, 2)
+            .save(input.join("image10.jpg"))
+            .unwrap();
+        image::RgbImage::new(2, 2)
+            .save(input.join("image2.png"))
+            .unwrap();
+        let (paths, metadata) = ProjectManager::for_diagnostics(temporary.path().join("projects"))
+            .create(&input, Quality::Balanced)
+            .await
+            .unwrap();
+        assert_eq!(metadata.input_type, ProjectInputType::Images);
+        assert!(metadata.source_path.is_dir());
+        assert!(metadata.source_path.join("frame_000001.png").is_file());
+        assert!(metadata.source_path.join("frame_000002.jpg").is_file());
+        let state: PipelineStateFile =
+            serde_json::from_slice(&tokio::fs::read(paths.state).await.unwrap()).unwrap();
+        assert_eq!(state.input_type, ProjectInputType::Images);
+        assert_eq!(state.image_sequence.unwrap().image_count, 2);
+    }
+
+    #[tokio::test]
+    async fn reports_image_import_progress() {
+        let temporary = tempfile::tempdir().unwrap();
+        let input = temporary.path().join("images");
+        std::fs::create_dir(&input).unwrap();
+        image::RgbImage::new(2, 2)
+            .save(input.join("image1.png"))
+            .unwrap();
+        image::RgbImage::new(2, 2)
+            .save(input.join("image2.jpg"))
+            .unwrap();
+        let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = updates.clone();
+        let observer: ProjectImportObserver = Arc::new(move |progress| {
+            captured.lock().unwrap().push(progress);
+        });
+
+        ProjectManager::for_diagnostics(temporary.path().join("projects"))
+            .create_with_progress(&input, Quality::Balanced, Some(observer), None)
+            .await
+            .unwrap();
+
+        let updates = updates.lock().unwrap();
+        assert_eq!(
+            updates.first().copied(),
+            Some(ProjectImportProgress {
+                current: 0,
+                total: 2
+            })
+        );
+        assert_eq!(
+            updates.last().copied(),
+            Some(ProjectImportProgress {
+                current: 2,
+                total: 2
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn image_project_creation_honors_cancellation_without_registering_a_project() {
+        let temporary = tempfile::tempdir().unwrap();
+        let input = temporary.path().join("images");
+        std::fs::create_dir(&input).unwrap();
+        image::RgbImage::new(2, 2)
+            .save(input.join("image1.png"))
+            .unwrap();
+        image::RgbImage::new(2, 2)
+            .save(input.join("image2.png"))
+            .unwrap();
+        let projects = temporary.path().join("projects");
+        let cancellation = CancellationToken::new();
+        let cancellation_from_observer = cancellation.clone();
+        let observer: ProjectImportObserver = Arc::new(move |progress| {
+            if progress.current == 1 {
+                cancellation_from_observer.cancel();
+            }
+        });
+
+        let result = ProjectManager::for_diagnostics(projects.clone())
+            .create_with_progress(
+                &input,
+                Quality::Balanced,
+                Some(observer),
+                Some(cancellation),
+            )
+            .await;
+
+        assert!(matches!(result, Err(SplatError::Cancelled)));
+        assert!(!projects.exists() || std::fs::read_dir(projects).unwrap().next().is_none());
+    }
+}

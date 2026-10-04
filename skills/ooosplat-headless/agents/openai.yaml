@@ -1,0 +1,4 @@
+interface:
+  display_name: "OOOSplat Headless"
+  short_description: "Build and operate the Ubuntu headless splat pipeline"
+  default_prompt: "Use $ooosplat-headless to configure CUDA-first COLMAP, verify, build, run, and monitor an OOOSplat job on Ubuntu 24.04 x86_64."

@@ -1,29 +1,15 @@
-node_modules/
-dist/
-*.tsbuildinfo
 target/
-src-tauri/target/
-src-tauri/gen/
 .idea/
 .vscode/
 *.log
 *.tmp
 .DS_Store
 .cargo-home/
-.npm-cache/
-.tmp/
+dist-headless/
 
 # Downloaded archives, extraction caches, and local diagnostics are never committed.
 .cache/
 
-# Native engines are restored from engines/manifest.json by npm run setup:engines.
-engines/ffmpeg/**
-!engines/ffmpeg/README.md
-engines/colmap/**
-!engines/colmap/README.md
-engines/brush/**
-!engines/brush/README.md
+# Brush is restored from engines/manifest.linux.json by the Linux setup script.
 engines/linux/brush/**
 !engines/linux/brush/README.md
-engines/macos/arm64/**
-!engines/macos/arm64/README.md

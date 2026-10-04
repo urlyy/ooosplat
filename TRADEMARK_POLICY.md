@@ -35,6 +35,6 @@ Do not register, or attempt to register, any mark, domain, or account name that 
 
 ## Questions and permission requests
 
-Open an issue at https://github.com/ooolabdev/ooosplat/issues and clearly describe the proposed use.
+Open an issue at https://github.com/urlyy/ooosplat/issues and clearly describe the proposed use.
 
 This policy does not limit uses permitted by applicable law, including nominative or descriptive fair use. All third-party names and marks remain the property of their respective owners. No failure to enforce this policy in one instance waives rights in another instance.

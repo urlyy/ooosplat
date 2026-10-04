@@ -1,429 +1,504 @@
-# OOOSplat
+# OOOSplat Headless
 
-[中文](README.md) | [English](README_EN.md)
-
-<p align="center">
-  <img src="assets/readme-logo.svg" alt="OOOSplat Logo" width="180">
-</p>
-
-<p align="center">
-  <a href="https://github.com/ooolabdev/ooosplat/releases/tag/0.5.0"><strong>⬇️ 下载 OOOSplat 0.5.0（Windows / macOS / Ubuntu）</strong></a>
-</p>
-
-OOOSplat 是一款将普通环绕拍摄视频或图片序列一键转换为 3D Gaussian Splatting 的本地桌面应用。选择素材、项目目录和质量档位后，应用会自动完成画面准备、相机重建、训练与 PLY 发布，并可直接预览、调整和导出结果。
-
-Windows 和 Apple Silicon macOS Alpha 均随应用提供 FFmpeg、FFprobe、COLMAP 和 Brush；Linux 支持目前仅作为 Ubuntu 24.04 LTS x86_64 Alpha 提供。整个生成流程使用本机 CPU 和 GPU，输入素材、工程文件、模型与日志无需上传到云端重建或训练服务。React 界面通过 Tauri 直接调用本机 Rust 后端，不需要远程服务或 localhost API。
-
-当前版本：**0.5.0**
-
-查看 [OOOSplat Roadmap](ROADMAP.md) 了解后续规划。
-
-> 0.5.0 新增默认开启、可关闭的实验性自动优化，可按素材、档位和显存规划重建与训练参数，并在视频重建覆盖不足时尝试桥接补帧；同时加入同相机增量高清补拍、Windows Brush 显卡稳定性与预览体验改进。
-
-## 核心优势
-
-- **一键生成高斯泼溅**：只需选择输入视频或图片序列、项目目录和质量档位，即可自动完成画面准备、COLMAP 相机重建、Brush 训练和 `final.ply` 发布，无需手动拼接命令或配置引擎。
-- **全平台兼容**：支持 Windows、macOS 和 Linux，可在三大主流桌面系统上完成本地高斯泼溅生成；具体系统与处理器要求请参阅下方兼容性说明。
-- **安全与隐私保护**：素材、抽帧、相机重建数据、高斯模型和日志默认只保存在用户选择的本地项目目录，核心生成流程在本机完成，无需将原始视频、图像或模型上传到第三方重建与训练平台，从而减少数据在网络传输、云端留存和未经授权访问过程中的泄露风险。
-- **完全本地化算力**：重建与训练均在用户自己的电脑上运行，不调用远程计算服务。满足要求时 COLMAP 自动使用本机 NVIDIA GPU 加速，否则回退 CPU，过程和数据始终由用户掌控。
-
-## 展示视频
-
-https://github.com/user-attachments/assets/5b9e8cef-4c71-4bfa-ba23-641fcdd37659
-
-## 界面预览
-
-### 创建与管理任务
-
-![OOOSplat 创建新任务与历史任务界面](assets/screenshots/task-workspace.png)
-
-### 高斯泼溅预览与调整
-
-![OOOSplat 高斯泼溅预览与 Transform 调整界面](assets/screenshots/gaussian-preview.png)
-
-## 主要功能
-
-- 从 MP4、MOV 视频，或包含 JPG、JPEG、PNG 的图片序列文件夹创建 Gaussian Splatting 项目。
-- 默认开启“自动优化（实验性）”：视频根据档位采用 6 / 8 / 12 FPS 初始采样，并在画面准备、COLMAP 和 Brush 阶段使用对应的分辨率策略；初始重建覆盖不足时，会在剩余预算内尝试补充桥接画面。关闭后继续使用旧版固定比例抽帧和分辨率策略。
-- 图片序列保留全部图片并使用共享相机、穷举匹配和现有增量 Mapper；视频使用顺序匹配，桥接补帧不适用于图片序列。
-- 自动检测透明 MOV 的 Alpha 通道，同步提取 RGBA PNG 画面与 COLMAP Mask；透明区域不会参与特征提取，同时保留给 Brush 训练使用。
-- 自动检测透明 PNG，保留 Alpha 供 Brush 使用，并生成 COLMAP Mask 排除完全透明区域。
-- 已完成项目支持“高清补拍”：使用同一设备、同一镜头和相同分辨率补充视频或图片后，OOOSplat 会复用原数据库、共享相机与稀疏模型，只处理新增画面的特征、匹配和注册，再使用全部已注册画面完整重训 Brush。透明 MOV/PNG 补拍素材会保留 RGBA 并自动生成 Mask；补拍会创建独立派生项目，不覆盖原项目。
-- Windows 安装包内置 CUDA 版 COLMAP；macOS Alpha 内置 arm64 CPU 版 COLMAP；Ubuntu 使用系统 CPU 版 COLMAP。三个平台均使用固定并校验的 FFmpeg/Brush 方案。
-- COLMAP 会自动检查内置 CUDA 运行时、NVIDIA 驱动版本和显卡 Compute Capability，满足要求时使用 GPU 加速特征提取与匹配，否则自动回退到 CPU。
-- 精细档会依据检测到的显存选择 Brush 训练分辨率和 Splat 上限；若明确检测到显存不足，会安全降低一次训练配置后重试。Windows 单 NVIDIA 独显环境还会优先稳定选择该独显，并为显卡设备中断提供明确提示。
-- 实时显示处理阶段、引擎输出、关键计数、累计耗时和最多 500 条界面日志。
-- 原始进程输出完整写入项目的 `logs` 目录。
-- 支持取消任务，并通过 Windows Job Object 或 Unix process group 终止整个子进程树。
-- 支持自定义项目根目录，默认位置为 `Documents\SplatStudio\Projects`。
-- 自动记录已完成、失败、中断和取消的历史任务。
-- 支持阶段级断点续跑：重新检查抽帧、Mask、COLMAP 数据库、稀疏重建和 PLY 检查点，复用可信阶段，并从最早的不可信阶段安全重跑。
-- 根据素材规模、质量档位和本机历史任务估算生成时长；Brush 训练阶段持续更新进度。
-- 在“03 预览”中直接加载历史项目的 `.ply`，支持 Orbit、Pan 和 Zoom；“调整 / 动画”双模式切换不会重新加载模型或重置相机。
-- 调整模式支持整个 Gaussian 模型的位置、旋转、等比缩放，以及撤销 / 重做。
-- 预览地面网格使用持久渲染资源，减少长时间预览中的重复绘制开销；模型 Transform 缩放范围扩展至 `0.001–10000`。
-- 提供矩形、球形和盒形 Gaussian 选择工具：矩形可穿透框选并非破坏式删除点，球形和盒形区域则实时保留区域内的 Gaussian。
-- 裁切区域和删除记录会自动保存；点击“保存”时将编辑结果写入唯一的 `edit.ply`，后续保存会安全替换该文件，始终不覆盖原始 `final.ply`。
-- 动画模式依次播放 5 秒显现、8 秒冲击波和持续相机环绕，并可导出带 OOOSplat 水印的 1080×1920、30 fps、23 秒 H.264 MP4。
-- 可在平台文件管理器中定位 `final.ply`，或将整个项目移入系统回收站。
-- 可拖动中央分界线调整左右面板宽度；右下角支持 80%–140% 整体界面缩放。
-- 支持中文、空格、长文件名和 UNC 项目路径。
-- 界面支持简体中文与英文即时切换；首次启动按系统语言自动选择，手动切换后会记住用户选择。
-
-### Gaussian 编辑快捷键
-
-- 矩形选择时，左键拖动替换选区，`Shift + 左键拖动`添加，`Ctrl + 左键拖动`移除；中键旋转视角，右键平移，滚轮缩放。
-- 黄色高亮表示当前选区；按 `Delete` 或 `Backspace` 删除选中 Gaussian，按 `Esc` 清空临时选区。
-- 球形或盒形选择会自动进入正交视图，可切换侧视图、正视图和顶视图，并通过视口控制器或数值面板调整位置与大小。
-- `Ctrl + Z` 撤销，`Ctrl + Shift + Z` 或 `Ctrl + Y` 重做。模型变换、裁切和删除共享同一历史记录；相机移动和临时黄色选区不计入历史。
-
-## 处理流程
+OOOSplat Headless 是面向 **Ubuntu 24.04 LTS x86_64** 服务器的视频/图片序列转
+3D Gaussian Splatting 命令行工具。仓库只保留本地 headless 生成链路，不包含
+React、Tauri、WebKit、桌面预览器，也不提供 Windows 或 macOS 安装包。
 
 ```text
-输入视频或图片序列
-  │
-  ├─ 视频：FFprobe 分析，FFmpeg 按档位目标 FPS 和工作分辨率抽帧；透明视频同步生成 RGBA 画面与 Mask
-  ├─ 图片：按文件名排序并保留全部图片；透明 PNG 自动生成 Mask
-  ├─ COLMAP：自动选择 CPU 或 CUDA GPU 提取特征；视频顺序匹配，图片穷举匹配
-  ├─ COLMAP：增量重建并验证注册率和三维点；自动优化开启时可按需尝试桥接补帧
-  ├─ Brush：使用可用 GPU 训练 Gaussian Splats；精细档按显存选择训练配置
-  └─ 校验 PLY 后原子发布为 final.ply
+视频或图片序列
+  -> FFprobe/图片头分析
+  -> 抽帧与质量规划
+  -> FFmpeg/图片序列准备
+  -> COLMAP CUDA 优先特征提取/匹配与稀疏重建
+  -> 重建质量校验
+  -> Brush Vulkan GPU 训练
+  -> final.ply
 ```
 
-只要 COLMAP 生成了至少一张注册图像和有效三维点，任务就会继续进入 Brush；注册率低于 80% 时会给出质量警告，但不再因低于 50% 自动终止。
+## 支持范围
 
-## 系统要求
+| 项目 | 支持情况 |
+| --- | --- |
+| 操作系统 | Ubuntu 24.04 LTS |
+| 架构 | x86_64/amd64 |
+| 运行方式 | 前台 CLI、后台单任务 worker |
+| 生成输入 | MP4/MOV 视频；同尺寸 JPG/PNG 图片序列目录 |
+| 输出 | 3D Gaussian Splatting `final.ply` |
+| COLMAP | CUDA 优先，探测失败自动回退 CPU；NVIDIA 服务器需安装 CUDA 构建 |
+| Brush | 固定为 v0.3.0 Linux x86_64，使用 Vulkan GPU |
+| 桌面界面 | 不支持 |
+| Windows/macOS | 不支持构建和发布 |
 
-- Windows 11，x64。
-- 支持 WebView2 Runtime。
-- 视频导出需要 WebView2 提供 WebCodecs AVC 编码能力；不支持时仍可在“动画”模式播放效果，但“导出视频”会显示不可用原因。
-- Brush 训练需要可用的 GPU 图形后端，建议使用独立显卡。
-- COLMAP 的 CUDA 加速需要 NVIDIA 显卡、Windows 驱动 528.33 或更高版本，以及 Compute Capability 5.0 或更高版本；不满足要求时程序会自动使用 CPU，无需用户配置。
-- 项目磁盘需要容纳源素材副本、输入图像、COLMAP 数据、Brush 中间文件和最终 PLY。长视频、大型图片序列或精细档位可能占用大量空间。
-- 安装模式为整机安装，安装时可能需要管理员权限。
+Brush 训练必须能访问可用的 Vulkan GPU。安装 `libvulkan1` 和 Mesa 只能提供
+Vulkan loader/软件实现；生产机器仍需安装与实际显卡匹配的 NVIDIA、AMD 或
+Intel 驱动。COLMAP 回退 CPU 不代表 Brush 可以无 GPU 完成训练。
 
-Windows 内置的 COLMAP 使用同时支持 CPU 与 CUDA GPU 的构建，运行前会自动选择可用后端；Brush 训练使用可用图形后端，二者的 GPU 检测与运行机制相互独立。
+## 从零安装
 
-### macOS 15+ Alpha（仅限 Apple Silicon）
+### 1. 安装 Rust
 
-> 当前交付为未签名、未公证的 `.app`/`.dmg` Alpha，仅支持 M1 或更新的 Apple Silicon Mac，不支持 Intel Mac 或 Universal Binary。
-
-- 内置原生 arm64 FFmpeg 8.1.2、独立 FFprobe、COLMAP 4.0.4 CPU CLI-only 和 Brush v0.3.0。
-- 用户不需要安装 Homebrew，也不会回退到 Homebrew 或系统 `PATH` 中的同名程序。
-- COLMAP 固定使用 CPU；Brush 独立选择可用的 Metal 图形后端，界面会明确显示该原因。
-- 首次打开未签名版本时，macOS Gatekeeper 可能阻止启动。请在 Finder 中右键应用并选择“打开”；正式版本将在后续接入 Apple 签名和公证。
-
-### Ubuntu 24.04 Alpha（仅限 x86_64）
-
-> 本 Alpha 交付由 Ubuntu 24.04 构建的 x86_64 `.deb` 安装包；不声明支持 Ubuntu 22.04、其他 Linux 发行版或生产环境部署。
-
-- Ubuntu 24.04 LTS，x86_64。
-- Brush 支持的图形后端和对应驱动；Brush 官方支持 AMD、Intel 和 NVIDIA GPU。当前端到端验证使用 NVIDIA GPU，CPU-only 软件图形后端尚未验证，但不会被启动检查人为阻止。
-- 从源码构建需要 Node.js 22.12+、Rust stable 和 Tauri 2 的 WebKitGTK 开发依赖；安装 `.deb` 的用户不需要这些开发工具。
-- Ubuntu 24.04 系统 `ffmpeg`、`ffprobe` 和 CPU 版 `colmap`（仓库版本为 COLMAP 3.9）。
-- Brush v0.3.0 Linux x86_64，由 `npm run setup:engines` 下载并校验。
-
-Ubuntu 依赖安装：
+全新系统先安装下载和版本管理工具：
 
 ```bash
-sudo apt update
-sudo apt install -y \
-  build-essential curl file ffmpeg colmap \
-  libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
-  libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl git
 ```
 
-请为显卡安装可用的 Vulkan 驱动（例如 NVIDIA 专有驱动，或 AMD/Intel 的 Mesa 驱动）。Ubuntu 24.04 仓库中的无 CUDA COLMAP 构建会自动使用 CPU；Brush 会在运行时选择可用的图形后端。完全 CPU-only 的软件 Vulkan 后端尚未完成端到端验证。
-
-从 GitHub Actions 下载 `OOOSplat-0.5.0-x64-linux` Artifact 后，可执行：
+项目使用 Rust stable：
 
 ```bash
-sudo apt install ./OOOSplat-0.5.0-x64-linux.deb
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+rustc --version
+cargo --version
 ```
 
-`.deb` 会通过 Ubuntu 包管理器安装 FFmpeg、FFprobe 和 CPU 版 COLMAP；固定版本 Brush 已包含在安装包中。
+### 2. 克隆并构建
 
-## 安装与使用
+NVIDIA GPU 云服务器请在克隆后先按下方「GPU 云服务器首次配置」安装 CUDA 版
+COLMAP，再构建本项目；只装系统 COLMAP 时可能回退 CPU。
 
-1. Windows 运行 `OOOSplat-0.5.0-x64-windows.exe`；Apple Silicon Mac 打开 `OOOSplat-0.5.0-arm64-macos.dmg` 并将 OOOSplat 拖入“应用程序”；Ubuntu 24.04 使用 `sudo apt install ./OOOSplat-0.5.0-x64-linux.deb`。
-2. 启动 OOOSplat，确认顶栏中的内置引擎状态正常；可使用右上角的 `EN / 中文` 按钮即时切换界面语言。
-3. 在“01 创建新任务”的输入类型下拉栏选择“视频”或“图片”，再点击输入框选择视频文件或图片序列文件夹。
-4. 选择项目根目录；程序会记住上次使用的位置。
-5. 选择“快速”“均衡”或“精细”档位。
-6. 查看自动检测到的 COLMAP 加速状态及原因，然后点击“开始生成”。
-7. 在左侧查看实时阶段、指标和日志；完成后，在“02 历史任务”中查看项目并点击“预览”。
-8. 在“03 预览”的“调整”模式中修改模型，Transform 会自动保存；点击“保存”生成或更新 `edit.ply`。
-9. 切换到“动画”可查看竖屏构图并重新播放效果；点击“导出视频”会在项目目录生成 23 秒竖屏 MP4。
-10. 如需补充细节，在“02 历史任务”的已完成项目中点击“高清补拍”，使用原项目相同设备、镜头、方向、分辨率和缩放倍率拍摄，并确保补拍画面与原素材有足够重叠。
+下面的命令会通过 apt 安装 Ubuntu 系统依赖、下载并校验固定版本 Brush，随后
+构建 release CLI：
 
-使用提示：
+```bash
+git clone https://github.com/urlyy/ooosplat.git
+cd ooosplat
+./scripts/build-headless-linux.sh --install-system-deps
+```
 
-- 拖动左右面板之间的分界线可以调整宽度；双击分界线恢复默认比例。
-- 点击右下角百分比按钮可缩小、恢复或放大整个界面。
-- 任务运行期间不可修改输入素材、项目目录和质量档位。
-- 点击“删除”会回收整个项目目录，包括源视频副本和所有中间文件；如果移入回收站失败，程序不会降级为永久删除。
+如果系统依赖已经安装：
+
+```bash
+./scripts/build-headless-linux.sh
+```
+
+构建脚本执行以下动作：
+
+1. 拒绝非 Linux x86_64 环境；
+2. 可选安装 FFmpeg、FFprobe、COLMAP、Vulkan loader 和构建依赖；
+3. 下载 Brush v0.3.0，并校验压缩包及可执行文件 SHA-256；
+4. 验证 FFmpeg、FFprobe、COLMAP 和 Brush CLI；
+5. 使用 `cargo build --locked --release` 构建；
+6. 清理旧的 `dist-headless/`，重新生成可部署目录。
+
+### 3. 健康检查
+
+```bash
+export OOOSPLAT_ENGINE_DIR="$PWD/dist-headless/engines"
+./dist-headless/splatstudio health
+```
+
+`health` 输出四个引擎的 JSON 状态。任一引擎不存在或无法启动时，命令返回非零
+退出码，因此可以直接用于 CI、部署探针或 Shell 的 `set -e` 流程。
+
+> `health` 验证 Brush CLI 可以启动，但不会提交真实 GPU 训练。首次生产使用前，
+> 仍应运行一个小型 `fast` 任务验证 Vulkan 驱动和显存环境。
+
+## GPU 云服务器首次配置
+
+默认 `OOOSPLAT_COLMAP_BACKEND=auto`：优先使用 CUDA 做 COLMAP 特征提取和匹配，
+启动探测失败时回退 CPU，并在 `health` 的 `acceleration.reason` 中说明原因。
+Mapper 相机重建仍主要使用 CPU，FFmpeg 抽帧也不启用硬件解码。Brush 使用独立的
+Vulkan 设备选择，不受这个 COLMAP 开关控制。
+
+推荐使用 Ubuntu 24.04 x86_64 的 NVIDIA GPU 镜像，先按云厂商说明安装或启用
+NVIDIA 驱动，确认 `nvidia-smi` 能看到显卡。CUDA 和 Vulkan 都必须可用。
+普通 `apt install colmap` 不保证包含 CUDA；NVIDIA 服务器首次运行按以下步骤：
+
+```bash
+# 在本仓库根目录，Rust stable 已安装；以下 apt 命令需要 sudo 或 root。
+./scripts/setup-colmap-cuda-linux.sh --install-system-deps
+export OOOSPLAT_COLMAP="$PWD/.cache/colmap-cuda/install/bin/colmap"
+./scripts/build-headless-linux.sh --install-system-deps
+export OOOSPLAT_ENGINE_DIR="$PWD/dist-headless/engines"
+
+# 强制验证 GPU 可用：失败返回非零，不静默转 CPU。
+OOOSPLAT_COLMAP_BACKEND=gpu ./dist-headless/splatstudio health
+
+# 首次用短视频验证完整生成；这里也要求 COLMAP 使用 GPU。
+OOOSPLAT_COLMAP_BACKEND=gpu ./dist-headless/splatstudio generate /data/object.mp4 \
+  --projects-root /data/ooosplat-projects --quality fast --background
+./dist-headless/splatstudio status --watch
+```
+
+CUDA 安装脚本固定 COLMAP 3.11.1（提交 `682ea9ac4020a143047758739259b3ff04dabe8d`），
+关闭 GUI 和 OpenGL，默认用 2 个编译任务、为当前显卡编译。首次构建需要下载 CUDA
+工具包和 C++ 依赖，可能花较长时间。`OOOSPLAT_BUILD_JOBS` 可调整编译并行数；
+`CUDA_ARCHITECTURES` 默认 `native`，跨显卡部署时应明确指定目标架构。
+较新显卡若不被 Ubuntu CUDA 工具包支持，需要先按 NVIDIA 文档安装匹配的工具包，
+准备 C++ 依赖后不带 `--install-system-deps` 运行脚本。
+
+`OOOSPLAT_COLMAP` 指向本机安装路径。该 CUDA 构建及其动态库不打包进
+`dist-headless/`，在另一台服务器上需重新安装。不要在使用期间删除
+`.cache/colmap-cuda/install`；新 Shell、systemd 服务都要设置同一个路径。
+
+`health` 和任务预检会使用临时目录内的两张 128×128 图片做 CUDA 特征提取及匹配，
+上限 30 秒，超时会清理子进程（可能另需约 3 秒）。它会短暂占用 GPU，完成后
+删除临时文件；仍不验证真实 Brush 训练。`health` 输出 COLMAP 的
+`acceleration.backend: "gpu"` 才表示 GPU 探测通过；仅 `cpuOnly: false` 不够。
+
+模式与选卡：
+
+- 不设置或 `OOOSPLAT_COLMAP_BACKEND=auto`：探测通过使用 GPU，否则使用 CPU。
+- `OOOSPLAT_COLMAP_BACKEND=gpu`：GPU 不可用时健康检查/任务失败。
+- `OOOSPLAT_COLMAP_BACKEND=cpu`：跳过 CUDA 探测，强制 COLMAP CPU。
+- CUDA 使用可见设备 0；例如 `CUDA_VISIBLE_DEVICES=1` 选择物理设备 1。
+  这不替代 Brush 的 Vulkan 选卡。AMD/Intel 服务器的 COLMAP 回退 CPU，Brush
+  仍可使用相应的 Vulkan GPU。
+
+自动回退仅发生在预检阶段；正式任务中途 GPU OOM、驱动错误会保留阶段断点并报错，
+不会隐式重跑 CPU。必要时显式以 CPU 模式 `resume`。
+
+## 构建产物与部署
+
+构建结果位于 `dist-headless/`：
+
+```text
+dist-headless/
+  splatstudio
+  engines/
+    manifest.linux.json
+    linux/brush/brush_app
+  licenses/
+    Brush-LICENSE.txt
+    COLMAP-LICENSE.txt
+    FFmpeg-LGPL-2.1.txt
+    MIT.txt
+    MPL-2.0.txt
+    THIRD_PARTY_NOTICES.txt
+    Unicode-3.0.txt
+    Zlib.txt
+  GENERATED_OUTPUTS.md
+  LICENSE
+  NOTICE
+  TRADEMARK_POLICY.md
+```
+
+可以把整个目录复制到另一台 Ubuntu 24.04 x86_64 机器，例如
+`/opt/ooosplat/`。目标机仍需安装系统运行依赖：
+
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends -y \
+  ca-certificates colmap ffmpeg libvulkan1 mesa-vulkan-drivers
+```
+
+生产机应按显卡厂商文档安装真实 GPU 驱动。运行时建议明确指定引擎目录：
+
+```bash
+export OOOSPLAT_ENGINE_DIR=/opt/ooosplat/engines
+/opt/ooosplat/splatstudio health
+```
+
+## 第一个生成任务
+
+服务器上建议使用后台模式：
+
+```bash
+./dist-headless/splatstudio generate /data/videos/object.mp4 \
+  --projects-root /data/ooosplat-projects \
+  --quality balanced \
+  --background
+```
+
+命令成功后会输出 worker PID、任务 ID（若初始化已完成）、日志路径和状态文件路径。
+随后监控进度：
+
+```bash
+./dist-headless/splatstudio status --watch
+```
+
+前台模式适合调试。按 `Ctrl+C` 会请求安全取消外部进程并保存最近的有效阶段断点：
+
+```bash
+./dist-headless/splatstudio generate /data/videos/object.mp4 \
+  --projects-root /data/ooosplat-projects \
+  --quality fast
+```
+
+## 输入要求
+
+### 视频
+
+- `generate` 和 `switch` 接受本地 MP4/MOV 文件。
+- `probe`、`plan` 和 `extract` 可以分析 FFprobe/FFmpeg 能读取的其他本地视频，
+  但这不代表该扩展名可以进入完整生成任务。
+- 旋转信息、帧率、时长和 Alpha 通道由 FFprobe 分析。
+- 抽帧计划受质量档位、视频时长和源帧率共同影响。
+
+### 图片序列
+
+- 输入参数传一个目录，而不是单张文件。
+- 支持 JPG/JPEG 和 PNG。
+- 图片会自然排序并校验尺寸；序列必须使用一致尺寸。
+- 含 Alpha 的 PNG 会生成与 COLMAP 图像同名的 Mask。
+
+示例：
+
+```bash
+./dist-headless/splatstudio generate /data/images/object-sequence \
+  --projects-root /data/ooosplat-projects \
+  --quality high \
+  --background
+```
 
 ## 质量档位
 
-“自动优化（实验性）”默认开启。视频会在抽帧时一次性缩放到对应工作分辨率，并保持原始宽高比且不会放大低分辨率素材；实际采样不会超过源视频 FPS 或总帧数。图片序列始终保留全部有效图片和原始输入分辨率，但 COLMAP 与 Brush 仍使用对应档位的处理上限。
-
-| 档位 | 视频初始 / 桥接上限 | 视频工作长边 | COLMAP 长边 / 最大特征数 | Brush 训练 |
+| 档位 | 视频目标/补救采样 | COLMAP 特征上限 | Brush 基础迭代 | 用途 |
 | --- | ---: | ---: | ---: | --- |
-| 快速 | 6 / 9 FPS | 最大 1,600 | 1,200 / 4,096 | 8,000 iterations，最大分辨率 1,600 |
-| 均衡 | 8 / 12 FPS | 最大 1,920 | 1,600 / 8,192 | 15,000 iterations，最大分辨率 1,920 |
-| 精细 | 12 / 15 FPS | 依据显存为最大 3,200、3,840 或原生分辨率 | 3,200 / 16,384 | 30,000 iterations，依据显存选择最大分辨率和 Splat 上限 |
+| `fast` | 6 / 9 FPS | 4,096 | 8,000 | 快速验证、驱动冒烟测试 |
+| `balanced` | 8 / 12 FPS | 8,192 | 15,000 | 默认生产档位 |
+| `high` | 12 / 15 FPS | 16,384 | 30,000 | 高质量输出，耗时和显存需求最高 |
 
-精细档的初始配置按可用显存划分：显存低于 8 GB 或无法读取时，视频和 Brush 最大长边为 3,200；8 GB（含）至 12 GB 之间为 3,840；12 GB（含）以上保留视频原生长边，并让 Brush 使用原生长边。三个精细配置的 COLMAP 图像长边均限制为 3,200。桥接补帧仅在视频初始重建覆盖不足且仍有候选画面时尝试；失败会安全回退到初始重建，不适用于图片序列。精细档在明确检测到显存不足时最多自动降低一次训练配置并重试。
+实际帧数会受到源帧率、最低帧数、分辨率规划和重建补救策略影响。Ubuntu
+headless 版本默认让 COLMAP 优先使用 CUDA，Brush 由 Vulkan 独立选择设备。`high`
+使用保守训练参数，并在 Brush OOM 时执行一次有界降级；这不等同于保证任意 GPU
+都能完成任务。
 
-关闭自动优化后，快速、均衡、精细档分别恢复为保留源视频 30%、50%、100% 画面的旧版策略；视频画面长边沿用旧版最大 1,920，Brush 最大训练分辨率分别为 1,200、1,600、2,000，且不额外设置 Splat 数量上限。
+## 完整命令
 
-## 项目与文件位置
-
-每次生成都会在项目根目录下创建一个独立文件夹：
-
-```text
-<项目根目录>\<yyyyMMdd-HHmmss_素材名>\
-  final.ply             最终 Gaussian Splatting 文件
-  project.json          项目元数据与结果指标
-  edit.ply              当前编辑结果；再次保存时安全替换（可选）
-  preview.mp4           首次动画预览视频导出（可选）
-  preview-2.mp4         后续视频导出自动编号（可选）
-  state.json            流水线状态
-  source\
-    input.<ext>         源视频副本（视频项目）
-    images\             规范化的源图片副本（图片序列项目）
-  work\
-    frames\             抽取或准备后的输入画面
-    masks\              透明素材对应的 COLMAP Mask（按需）
-    colmap\             COLMAP 数据库与稀疏重建
-    brush\              Brush 数据集与训练中间文件
-  logs\                 FFmpeg、COLMAP、Brush 等完整日志
-```
-
-项目名中的 Windows 非法字符会被清理；发生重名时自动追加 `-2`、`-3` 等后缀。
-
-应用设置和项目索引保存在：
+全局参数：
 
 ```text
-%LOCALAPPDATA%\SplatStudio\settings.json
-%LOCALAPPDATA%\SplatStudio\project-index.json
-%LOCALAPPDATA%\SplatStudio\telemetry.json
+--engine-dir <DIR>  覆盖引擎目录；等价环境变量为 OOOSPLAT_ENGINE_DIR
+--json              tasks/status/pause 等命令输出 JSON；status --watch 输出 NDJSON
+-h, --help          帮助
+-V, --version       版本
 ```
 
-## 匿名使用统计
-
-OOOSplat 默认开启匿名使用统计，用于了解稳定性和各阶段耗时。可在右上角 **设置 → 隐私** 中随时关闭，关闭后不再发送任何请求。
-
-会发送的内容：
-
-| 字段 | 说明 |
-| --- | --- |
-| 安装 ID | 首次启动生成的随机 UUID，不读取硬件序列号、MAC 地址或设备指纹 |
-| 应用版本、操作系统、CPU 架构 | 例如 `0.5.0` / `windows` / `x86_64` |
-| 事件名 | `daily_active`、`generation_started`、`generation_completed`、`generation_failed`、`pipeline_stage_completed`、`planner_evaluation`。`daily_active` 每天最多一次，应用升级后当天会再报一次 |
-| 质量档位与输入类型 | 枚举值，例如 `balanced` / `video`；图片序列输入报 `images` |
-| 阶段耗时与总耗时 | 毫秒 |
-| 帧数与视频时长 | 分桶值，不是原始数量 |
-| 自动优化效果指标 | 匿名的素材尺寸与数量、规划结果、注册结果、桥接补帧、Brush 配置、Splat 数量和阶段耗时，用于比较自动优化效果 |
-| 失败阶段与错误码 | 枚举值，例如 `colmap_mapper_failed`；不含原始错误文本 |
-
-不会发送的内容：视频、图片、PLY 等任何素材；文件名、路径和项目名称；日志与命令输出；用户名或任何个人信息。
-
-## 内置引擎
-
-| 引擎 | 固定版本/构建 | 用途 |
+| 命令 | 作用 | 是否修改状态 |
 | --- | --- | --- |
-| FFmpeg / FFprobe | Windows x64 8.1 LGPL shared；macOS arm64 8.1.2 LGPL shared | 视频分析与抽帧 |
-| COLMAP | Windows 4.0.4 CUDA；macOS arm64 4.0.4 CPU CLI-only | 特征、匹配和相机重建 |
-| Brush | v0.3.0 Windows x64 / macOS arm64 | Gaussian Splatting 训练与 PLY 导出 |
+| `health` | 检查引擎，auto/gpu 模式探测 CUDA | 临时目录与短时 GPU 探测 |
+| `probe <INPUT>` | 输出视频或图片序列元数据 | 否 |
+| `plan <INPUT> --quality ...` | 计算抽帧/图片计划 | 否 |
+| `extract <INPUT> <OUTPUT>` | 只准备帧与可选 Mask | 写指定输出目录 |
+| `generate <INPUT>` | 创建项目并运行完整流水线 | 是 |
+| `tasks` | 列出已注册任务和短 ID | 否 |
+| `status [TASK_ID]` | 查看活动任务或持久化任务 | 否 |
+| `pause` | 向当前 worker 发送安全停止信号 | 是 |
+| `resume <TASK_ID>` | 从最近有效断点继续 | 是 |
+| `switch <INPUT_OR_TASK_ID>` | 安全暂停当前任务，再启动/恢复另一个任务 | 是 |
 
-Windows、Ubuntu 和 macOS 的来源与校验策略分别记录在 [`engines/manifest.json`](engines/manifest.json)、[`engines/manifest.linux.json`](engines/manifest.linux.json) 和 [`engines/manifest.macos.json`](engines/manifest.macos.json)。大型引擎文件不会提交到 Git；开发者通过 `npm run setup:engines` 恢复本地运行时。Release 打包前会校验来源、哈希、架构、动态库闭包和 Brush CLI 参数。
-
-第三方许可和通知位于 [`licenses/`](licenses/)：
-
-- FFmpeg：LGPL-2.1-or-later，本项目选用的构建禁用 GPL/nonfree 组件。
-- COLMAP：BSD-3-Clause。
-- Brush：Apache-2.0。
-
-## 本地开发
-
-### 开发环境
-
-- Node.js 22.12 或更高版本。
-- Rust stable，目标为 `x86_64-pc-windows-msvc`。
-- Visual Studio 2022 Build Tools，包含 Desktop development with C++。
-- Tauri 2 所需的 WebView2 开发/运行环境。
-
-安装依赖并启动开发模式：
-
-```powershell
-npm install
-npm run setup:engines
-npm run tauri -- dev
-```
-
-### Ubuntu 24.04 Alpha 开发
-
-安装上面的 Ubuntu 系统依赖、Node.js 和 Rust 后：
+查看每个子命令的精确参数：
 
 ```bash
-npm ci
-npm run setup:engines
-npm run verify:engines
-npm run verify:licenses
-npm run tauri -- dev
+./dist-headless/splatstudio --help
+./dist-headless/splatstudio generate --help
+./dist-headless/splatstudio status --help
 ```
 
-也可以在仓库根目录运行 `./scripts/start-app-linux.sh`，或使用 `npm run start:app:linux`。启动脚本会先校验本机引擎和许可映射，仅在源码更新时重新构建 Release 可执行文件。
-
-Ubuntu 24.04 Alpha 的 `setup:engines` 只安装校验后的 Brush 到 `engines/linux/brush/`；FFmpeg、FFprobe 和 CPU 版 COLMAP 保持为系统软件包。Tauri 将 Brush 作为资源打入 x86_64 `.deb`，并在 Debian 依赖中声明 FFmpeg 和 COLMAP。
-
-Ubuntu 24.04 Alpha 自动检查位于 `.github/workflows/ubuntu.yml`。普通 GitHub runner 会执行前端、许可映射、Rust、Clippy、FFmpeg 集成、`.deb` 构建、包结构校验并上传安装包与 SHA-256；Brush 端到端验证需要具有可用图形后端的主机或自托管 runner。目前完整流水线仅在 NVIDIA 主机上验证，欢迎补充 AMD、Intel 和软件 Vulkan 的测试结果。
-
-### macOS 15+ Apple Silicon Alpha 开发
-
-在 Apple Silicon Mac 上安装 Node.js、Rust 和 Xcode Command Line Tools 后：
+### 只分析或抽帧
 
 ```bash
-npm ci
-npm run setup:engines
-npm run verify:engines
-npm run verify:licenses
-npm run tauri -- dev
+./dist-headless/splatstudio probe /data/videos/object.mp4
+./dist-headless/splatstudio plan /data/videos/object.mp4 --quality balanced
+./dist-headless/splatstudio extract /data/videos/object.mp4 /data/prepared/frames \
+  --quality balanced
 ```
 
-`setup:engines` 从同仓库的固定 GitHub Release 下载完整 arm64 运行时；Homebrew 只用于维护者先执行 `npm run setup:build-deps:macos`，再执行 `npm run build:engines:macos` 重建引擎。`.github/workflows/macos.yml` 构建未签名应用和 DMG，`.github/workflows/macos-engines.yml` 生成并发布锁定的引擎归档。
+视频 `extract` 的 Mask 目录位于输出帧目录的同级 `masks/`。
 
-### 测试与检查
+### 任务管理
 
-```powershell
-# 前端测试
-npm test
-
-# 前端生产构建
-npm run build
-
-# Rust 测试
-cargo test --manifest-path src-tauri\Cargo.toml
-
-# Rust 静态检查
-cargo clippy --manifest-path src-tauri\Cargo.toml --all-targets -- -D warnings
-
-# 校验内置引擎版本、哈希和 COLMAP CUDA 运行时
-npm run verify:engines
-
-# 校验第一方许可、第三方通知及安装包资源映射
-npm run verify:licenses
+```bash
+./dist-headless/splatstudio tasks
+./dist-headless/splatstudio status 12ab34cd
+./dist-headless/splatstudio status --watch
+./dist-headless/splatstudio pause
+./dist-headless/splatstudio resume 12ab34cd --background
+./dist-headless/splatstudio switch /data/videos/another.mp4 \
+  --projects-root /data/ooosplat-projects \
+  --quality balanced
+./dist-headless/splatstudio switch 12ab34cd
 ```
 
-### 生成 Windows 安装包
+任务 ID 可以使用完整 UUID，也可以使用 `tasks` 输出的唯一前缀。默认只允许一个
+活动生成任务，避免多个 Brush 进程争抢同一张 GPU。`switch` 最多等待 60 秒让
+当前任务安全退出；超时不会强杀任务。
 
-```powershell
-npm run package:windows
+### JSON/NDJSON 自动化
+
+```bash
+./dist-headless/splatstudio --json tasks
+./dist-headless/splatstudio --json status 12ab34cd
+./dist-headless/splatstudio --json status --watch
+./dist-headless/splatstudio --json pause
 ```
 
-NSIS 安装包输出到：
+`status --watch` 在活动任务结束后输出最终持久化状态并退出。不要把普通日志和
+NDJSON 混在同一解析通道；后台 worker 的 stdout/stderr 写入独立日志文件。
+
+## 数据、状态与环境变量
+
+| 变量 | 作用 | 默认值/发现顺序 |
+| --- | --- | --- |
+| `OOOSPLAT_ENGINE_DIR` | 引擎根目录 | CLI 相邻 `engines/`、当前目录、系统 PATH |
+| `OOOSPLAT_FFMPEG` | 指定 FFmpeg 可执行文件 | 引擎目录后回退 PATH |
+| `OOOSPLAT_FFPROBE` | 指定 FFprobe 可执行文件 | 引擎目录后回退 PATH |
+| `OOOSPLAT_COLMAP_BACKEND` | COLMAP 后端：auto/gpu/cpu | auto，CUDA 优先 |
+| `CUDA_VISIBLE_DEVICES` | COLMAP 可见 CUDA 设备及顺序 | CUDA 默认可见设备 |
+| `OOOSPLAT_COLMAP` | 指定 COLMAP 可执行文件 | 引擎目录后回退 PATH |
+| `OOOSPLAT_BRUSH` | 指定 Brush 可执行文件 | 引擎目录后回退 PATH |
+| `OOOSPLAT_DATA_DIR` | 默认项目、任务索引和设置根目录 | `${XDG_DATA_HOME:-$HOME/.local/share}/SplatStudio` |
+| `OOOSPLAT_RUNTIME_DIR` | 活动状态、锁和 worker 日志目录 | `<DATA_DIR>/headless` |
+| `RUST_LOG` | CLI/Brush 日志过滤级别 | 未设置时使用程序默认值 |
+
+如果设置了 `OOOSPLAT_RUNTIME_DIR`，该值就是运行目录本身，不会再追加
+`headless/`。命令行 `--engine-dir` 的优先级高于自动发现；各单引擎变量用于更细
+粒度覆盖。
+
+默认运行状态：
 
 ```text
-dist-artifacts\OOOSplat-0.5.0-x64-windows.exe
+${XDG_DATA_HOME:-$HOME/.local/share}/SplatStudio/
+  project-index.json
+  settings.json                 # 存在旧设置时兼容读取
+  Projects/                     # 未传 --projects-root 时的默认项目目录
+  headless/
+    active.json                 # 原子更新的活动任务状态
+    active.lock                 # 单任务锁
+    worker-*.log                # 后台 worker 日志
 ```
 
-首次构建前必须运行 `npm run setup:engines`。`beforeBuildCommand` 会自动执行引擎校验和前端生产构建，但不会在打包过程中隐式访问网络。
+单个项目目录：
 
-## CLI
-
-仓库同时提供 `splatstudio` 诊断 CLI：
-
-```powershell
-# 检查所有内置引擎
-cargo run --manifest-path src-tauri\Cargo.toml --bin splatstudio -- health
-
-# 读取视频信息
-cargo run --manifest-path src-tauri\Cargo.toml --bin splatstudio -- probe "D:\Videos\orbit.mp4"
-
-# 查看抽帧计划但不写出画面
-cargo run --manifest-path src-tauri\Cargo.toml --bin splatstudio -- plan "D:\Videos\orbit.mp4" --quality balanced
-
-# 单独抽帧
-cargo run --manifest-path src-tauri\Cargo.toml --bin splatstudio -- extract "D:\Videos\orbit.mp4" "D:\Frames" --quality fast
-
-# 运行完整流水线（自动检测并选择 COLMAP GPU 或 CPU）
-cargo run --manifest-path src-tauri\Cargo.toml --bin splatstudio -- generate "D:\Videos\orbit.mp4" --projects-root "D:\Splat Projects" --quality balanced
-
-# 图片序列使用同一命令，传入文件夹即可
-cargo run --manifest-path src-tauri\Cargo.toml --bin splatstudio -- generate "D:\Photos\object" --projects-root "D:\Splat Projects" --quality balanced
+```text
+<projects-root>/<timestamp>_<input-name>/
+  project.json
+  state.json
+  final.ply                     # 完成后原子发布
+  source/
+  work/
+    frames/
+    colmap/
+    brush/
+  logs/
 ```
 
-开发或诊断时可以通过全局参数 `--engine-dir <路径>`，或环境变量 `OOOSPLAT_ENGINE_DIR`，覆盖默认引擎目录。
+## 暂停与断点恢复
 
-Linux 还可分别使用 `OOOSPLAT_FFMPEG`、`OOOSPLAT_FFPROBE`、`OOOSPLAT_COLMAP` 和 `OOOSPLAT_BRUSH` 指定可执行文件；未指定时按仓库托管目录和系统 `PATH` 依次发现。
+- 抽帧、特征提取、匹配、稀疏重建和 Brush 完成状态会写入 `state.json`。
+- 恢复前会验证实际文件，缺失或损坏的产物不会被误当成有效断点。
+- `final.ply` 使用临时文件原子发布，半成品不会被标记为完成结果。
+- Brush v0.3.0 在本项目中没有迭代内 checkpoint 接口。如果在 Brush 训练中暂停，
+  恢复会重新开始 Brush 阶段，但会复用已验证的帧和 COLMAP 结果。
+- 不要手工修改 `project.json`、`state.json`、`active.json` 或 `active.lock`。
+- 不要直接 `kill -9` COLMAP/Brush。优先使用 `pause`，让 worker 结束子进程并保存
+  最近的有效阶段。
 
-## 常见问题
+## 常见故障
 
-### 如何让 COLMAP 使用显卡？
+### `health` 返回非零
 
-无需手动选择。应用会检查内置 COLMAP CUDA 运行时、NVIDIA 驱动版本和显卡 Compute Capability，满足要求时自动使用 GPU 加速特征提取与匹配，否则自动回退到 CPU。当前最低要求为 Windows 驱动 528.33、Compute Capability 5.0；实际检测结果和未启用原因会显示在“01 创建新任务”中。Brush 与 COLMAP 相互独立，会在运行时选择可用的图形后端。
+先保留完整 JSON 和 stderr：
 
-### 不同显卡组合会如何处理？
+```bash
+./dist-headless/splatstudio health 2>health.err | tee health.json
+```
 
-COLMAP 和 Brush 是两个独立阶段：COLMAP 只有兼容的 NVIDIA CUDA 环境才能使用 GPU；Brush 在 Windows 和 Linux 上使用 Vulkan，在 Apple Silicon macOS 上使用 Metal。常见组合按以下方式处理；表中未另行标注平台的组合均指 Windows：
+检查 `path`、`exists`、`canStart` 和 `detail` 字段。引擎目录不正确时设置
+`OOOSPLAT_ENGINE_DIR`，系统命令不在 PATH 时使用对应的单引擎变量。
 
-| 平台与显卡组合 | COLMAP | Brush 训练 | 自动优化的精细档显存配置 |
-|---|---|---|---|
-| Windows：单张 NVIDIA 独显 | 满足驱动和 Compute Capability 要求时使用 CUDA | 明确选择第一张独立 GPU，通过 Vulkan 运行 | 使用该 NVIDIA 显卡的总显存选择 Low、Standard 或 Large |
-| Intel 核显 + 单张 NVIDIA 独显 | 使用符合要求的 NVIDIA CUDA | 明确选择第一张独立 GPU，避免误用 Intel 核显 | 使用 NVIDIA 总显存分档 |
-| AMD 核显 + 单张 NVIDIA 独显 | 使用符合要求的 NVIDIA CUDA | 明确选择第一张独立 GPU，并仅为 Brush 子进程规避 AMD Switchable Graphics 隐式层 | 使用 NVIDIA 总显存分档 |
-| 仅 AMD，或 Intel 核显 + AMD 独显 | 自动回退 CPU | 由 Vulkan 自动选择 AMD GPU；不会禁用 AMD 图形层 | 当前使用保守的 Low 配置 |
-| 仅 Intel 核显或 Intel 独显 | 自动回退 CPU | 由 Vulkan 自动选择 Intel GPU | 当前使用保守的 Low 配置 |
-| 多张 NVIDIA 显卡 | 选择 Compute Capability 最高的兼容显卡；相同时选择 NVIDIA 索引较小者 | 因 Vulkan 与 CUDA 的设备索引不能可靠对应，不强制 Brush 的设备索引，由 Vulkan 自动选择 | 使用 COLMAP 选中显卡的总显存分档 |
-| AMD 独显 + NVIDIA 独显 | COLMAP 使用符合要求的 NVIDIA | 当前会进入单 NVIDIA 优先策略，但跨品牌独显的 Vulkan 排序无法完全保证；建议同时在 Windows 图形设置中把 `brush_app.exe` 设为“高性能”并检查任务日志中的实际适配器 | 使用 NVIDIA 总显存分档 |
-| NVIDIA 驱动过旧、型号不兼容或检测失败 | 自动回退 CPU | Brush 仍会尝试通过 Vulkan 自动选择可用 GPU，但不会强制 NVIDIA | 当前使用保守的 Low 配置 |
-| 没有可用 GPU 图形后端 | COLMAP 使用 CPU | Brush 可能无法启动；CPU-only 软件图形后端尚未完成端到端验证 | 不适用 |
-| macOS：Apple Silicon M 系列（含 Pro、Max、Ultra） | 当前使用 CPU，不启用 CUDA | 自动使用 M 系列芯片的 Metal GPU 和统一内存 | 当前不会按统一内存容量提升显存档，使用保守的 Low 配置 |
-| Ubuntu Alpha：NVIDIA、AMD 或 Intel GPU | 当前使用 CPU | 通过 Vulkan 自动选择可用 GPU | 当前使用保守的 Low 配置 |
+### Brush/Vulkan 启动或训练失败
 
-上述强制选卡和 AMD 隐式层规避只通过环境变量传给单次 `brush_app.exe` 子进程，不会修改系统环境、驱动设置或其他应用，也不会将 Brush 切换到 D3D12。AMD-only 设备不会应用 AMD 隐式层规避。
+```bash
+ldd ./dist-headless/engines/linux/brush/brush_app
+ls -l /dev/dri
+```
 
-如果 Brush 日志显示 `Device Lost`，OOOSplat 会将其与显存不足区分并给出提示，但不会自动降低质量重试。建议接通电源、关闭其他 GPU 高负载程序，并在 Windows“设置 → 系统 → 显示 → 图形”中将 `brush_app.exe` 设为“高性能”。精细档只有在明确识别为显存不足时才会降低一级配置，并且最多重试一次。
+确认容器/虚拟机暴露 GPU 设备，并安装了与宿主显卡匹配的 Vulkan 驱动。Mesa 软件
+实现只能证明 loader 存在，不能替代生产 GPU 驱动。
 
-M 系列芯片的 CPU 与 GPU 共享统一内存，但当前 Planner 不会把统一内存等同于独立显存。因此，即使是内存较大的 M 系列 Pro、Max 或 Ultra，精细档目前仍采用 Low 配置；这属于保守兼容策略，不代表 Metal 训练只能使用少量统一内存。
+### 任务中断或服务器重启
 
-### 为什么会出现注册率较低的警告？
+```bash
+./dist-headless/splatstudio tasks
+./dist-headless/splatstudio status <TASK_ID>
+./dist-headless/splatstudio resume <TASK_ID> --background
+```
 
-注册率较低通常表示可用于重建的连续视角不足。任务仍会继续进入 Brush，但结果质量可能受影响。建议使用曝光稳定、画面清晰、运动连续、视角重叠充分的环绕拍摄视频，避免快速转动、强反光、大面积纯色和运动物体。
+查看任务目录下的 `logs/` 和运行目录下的 `worker-*.log`。只有在状态为
+`completed` 且 `final.ply` 实际存在时，才把任务视为成功。
 
-### 为什么项目占用空间很大？
+### 磁盘空间
 
-每个项目会保留源视频副本、抽帧、COLMAP 数据和 Brush 中间文件，便于诊断和追溯。确认结果后，可通过历史任务中的“删除”将整个项目移入回收站。
+项目会同时保存源文件、抽取帧、COLMAP 数据库/模型、Brush 工作目录和最终 PLY。
+运行前应为项目根目录预留明显高于输入文件大小的空间。项目没有自动删除命令；
+确认无需恢复后，再由运维人员删除整个项目目录并备份必要结果。
 
-### 可以直接在应用中查看 final.ply 吗？
+## 开发与验证
 
-可以。在“02 历史任务”中选择已完成项目并点击“预览”，即可在独立预览工作区浏览 `.ply`。“调整”模式支持整体 Transform，以及矩形、球形和盒形 Gaussian 选择；可以非破坏式删除、裁切、撤销和重做。编辑状态会保存在项目中，点击“保存”生成或更新唯一的 `edit.ply`，原始 `final.ply` 始终不变。“动画”模式提供 5 秒显现、8 秒冲击波、持续环绕以及带水印的竖屏 MP4 导出；`.sog` 和 `.spz` 尚未开放。
+修改 Rust 代码后必须运行：
 
-## 技术栈
+```bash
+cargo fmt -- --check
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
+cargo build --locked --bin splatstudio
+python3 tests/colmap_backend_smoke.py target/debug/splatstudio
+```
 
-- 桌面框架：Tauri 2
-- 后端：Rust、Tokio
-- 前端：React 19、TypeScript、Vite、Zustand
-- Gaussian 预览与动画：PlayCanvas Engine、PlayCanvas React
-- 视频编码与封装：WebCodecs、Mediabunny
-- 原生流水线：FFmpeg / FFprobe、COLMAP、Brush
-- 进程树管理：Windows Job Object；Linux Unix process group
+修改 Shell、构建或发布逻辑后还要运行：
 
-## 许可说明
+```bash
+bash -n scripts/*.sh
+./scripts/build-headless-linux.sh --help
+```
 
-### 代码许可
+Ubuntu 实机端到端验证：
 
-OOOSplat 的第一方代码及随附文档以 [Apache License 2.0](LICENSE) 发布。版权声明见 [NOTICE](NOTICE)。
+```bash
+./scripts/build-headless-linux.sh
+export OOOSPLAT_ENGINE_DIR="$PWD/dist-headless/engines"
+./dist-headless/splatstudio health
+```
 
-### 第三方组件
+CI 位于 `.github/workflows/ubuntu.yml`，覆盖 Ubuntu 24.04 系统依赖、Brush 校验、
+Rust 格式/测试/clippy、GPU 策略模拟集成、FFmpeg probe/extract 集成和发行目录构建。
+普通 CI 没有 NVIDIA GPU，不执行 CUDA 源码构建或真实 CUDA/Vulkan 训练。
 
-FFmpeg / FFprobe、COLMAP、Brush、PlayCanvas 和 Mediabunny 分别适用其自身许可证，不因与 OOOSplat 一同分发而改用 Apache-2.0。直接组件的版本、来源、许可证和许可证正文入口见 [第三方通知](licenses/THIRD_PARTY_NOTICES.txt) 与 [引擎清单](engines/manifest.json)。该清单不表示已经完成 Qt、Boost、Ceres 等传递依赖的完整许可审计。
+仓库修改约束、测试矩阵和文档同步规则见 [AGENTS.md](AGENTS.md)。
 
-### 品牌
+## Agent skill
 
-Apache-2.0 不授予 “OOOSplat” 名称、Logo、图标或其他视觉标识的商标使用权。真实引用、教程、截图、官方未修改版本分发及修改版命名规则见 [OOOSplat Trademark Policy](TRADEMARK_POLICY.md)。
+仓库附带 [`ooosplat-headless`](skills/ooosplat-headless/SKILL.md) skill，可让
+TraeCode/Codex agent 按固定流程构建、检查、生成、监控、暂停和恢复任务。
 
-### 生成模型
+安装到用户级 skill 目录：
 
-`final.ply` 等生成结果不会仅因使用 OOOSplat 而自动适用 Apache、GPL、LGPL 或其他随附软件许可证。该说明不判断模型著作权归属，也不授予输入素材或第三方内容的权利；完整边界见 [Generated Outputs](GENERATED_OUTPUTS.md)。
+```bash
+mkdir -p ~/.trae/skills
+cp -R skills/ooosplat-headless ~/.trae/skills/
+```
+
+调用示例：
+
+```text
+使用 $ooosplat-headless 检查 Ubuntu 服务器环境并构建项目
+使用 $ooosplat-headless 把 /data/object.mp4 生成为 balanced 模型并监控进度
+```
+
+## 仓库结构
+
+```text
+Cargo.toml                     Rust 项目入口
+src/bin/splatstudio.rs         公共 CLI
+src/bin/splatstudio/headless.rs 后台任务与运行状态管理
+src/pipeline/                  生成流水线、进度、断点和耗时估计
+src/project/                   项目目录、元数据和索引
+src/engines/                   FFmpeg/FFprobe/COLMAP/Brush 适配
+src/video/                     视频分析、抽帧和图片序列准备
+scripts/                       Ubuntu 构建、引擎安装和校验
+engines/manifest.linux.json    Brush 固定版本与 SHA-256
+skills/ooosplat-headless/      Agent skill
+licenses/                      直接依赖许可证与声明
+```
+
+## 许可证
+
+项目使用 Apache-2.0，见 [LICENSE](LICENSE)。第三方组件见
+[licenses/THIRD_PARTY_NOTICES.txt](licenses/THIRD_PARTY_NOTICES.txt)，生成文件的
+许可说明见 [GENERATED_OUTPUTS.md](GENERATED_OUTPUTS.md)。
+
+更聚焦的服务器运行手册见 [HEADLESS_LINUX.md](HEADLESS_LINUX.md)。
